@@ -3,8 +3,17 @@ from flask_socketio import SocketIO, emit, join_room
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Configure CORS properly
+CORS(app, resources={
+    r"/*": {
+        "origins": ["https://broadcast-music-gqhx.vercel.app", "https://broadcast-music.vercel.app"],
+        "methods": ["GET", "POST"],
+        "allow_headers": ["Content-Type"]
+    }
+})
+
+# Configure SocketIO with proper CORS settings
+socketio = SocketIO(app, cors_allowed_origins=["https://broadcast-music-gqhx.vercel.app", "https://broadcast-music.vercel.app"])
 
 rooms = {}
 
@@ -12,6 +21,7 @@ rooms = {}
 def index():
     return "Music Broadcast Server Running"
 
+# Rest of the handlers remain the same
 @socketio.on('create_room')
 def on_create(data):
     room_id = data['roomId']
@@ -33,7 +43,6 @@ def on_join(data):
     if room_id in rooms:
         join_room(room_id)
         rooms[room_id]['users'].append(data.get('username', 'Anonymous'))
-        # Send current track state to new user
         emit('music_state', {
             'track': rooms[room_id]['current_track'],
             'isPlaying': rooms[room_id]['is_playing'],

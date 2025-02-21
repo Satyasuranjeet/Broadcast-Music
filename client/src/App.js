@@ -14,7 +14,24 @@ const App = () => {
   const audioRef = useRef(null);
 
   useEffect(() => {
-    const newSocket = io('https://broadcast-music.vercel.app');
+    // Configure Socket.IO client with proper options
+    const newSocket = io('https://broadcast-music.vercel.app', {
+      withCredentials: true,
+      transports: ['websocket'],
+      path: '/socket.io',
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
+
+    newSocket.on('connect', () => {
+      console.log('Connected to server');
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+      setMessage('Connection error. Please try again.');
+    });
+
     setSocket(newSocket);
 
     return () => newSocket.close();
@@ -44,7 +61,10 @@ const App = () => {
         setIsPlaying(data.isPlaying);
         
         if (data.isPlaying) {
-          audioRef.current.play();
+          audioRef.current.play().catch(error => {
+            console.error('Audio playback error:', error);
+            setMessage('Error playing audio. Please check the URL.');
+          });
         } else {
           audioRef.current.pause();
         }
@@ -56,6 +76,18 @@ const App = () => {
       setMessage(`${data.username} joined the room`);
     });
 
+    // Add error handling for disconnections
+    socket.on('disconnect', () => {
+      setMessage('Disconnected from server. Attempting to reconnect...');
+    });
+
+    return () => {
+      socket.off('room_created');
+      socket.off('join_failed');
+      socket.off('music_state');
+      socket.off('user_joined');
+      socket.off('disconnect');
+    };
   }, [socket]);
 
   const createRoom = () => {
@@ -87,14 +119,18 @@ const App = () => {
   const togglePlayPause = () => {
     if (!audioRef.current) return;
 
-    if (isPlaying) {
-      audioRef.current.pause();
-    } else {
-      audioRef.current.play();
-    }
-
     const newPlayState = !isPlaying;
     setIsPlaying(newPlayState);
+
+    if (newPlayState) {
+      audioRef.current.play().catch(error => {
+        console.error('Audio playback error:', error);
+        setMessage('Error playing audio. Please check the URL.');
+        setIsPlaying(false);
+      });
+    } else {
+      audioRef.current.pause();
+    }
     
     socket.emit('play_pause', {
       roomId,
