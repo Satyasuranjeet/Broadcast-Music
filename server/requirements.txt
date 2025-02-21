@@ -1,0 +1,6 @@
+Flask
+Flask-SocketIO
+flask-cors
+eventlet
+gevent
+gevent-websocket
