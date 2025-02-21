@@ -14,7 +14,7 @@ const App = () => {
   const audioRef = useRef(null);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const newSocket = io('broadcast-music.vercel.app');
     setSocket(newSocket);
 
     return () => newSocket.close();
