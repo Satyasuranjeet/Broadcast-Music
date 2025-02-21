@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import io from 'socket.io-client';
+import { v4 as uuidv4 } from 'uuid';
+
+const API_BASE_URL = 'https://broadcast-music.vercel.app';
 
 const App = () => {
-  const [socket, setSocket] = useState(null);
   const [roomId, setRoomId] = useState('');
   const [username, setUsername] = useState('');
   const [isHost, setIsHost] = useState(false);
@@ -12,131 +13,173 @@ const App = () => {
   const [users, setUsers] = useState([]);
   const [message, setMessage] = useState('');
   const audioRef = useRef(null);
+  const eventSourceRef = useRef(null);
+  const clientId = useRef(uuidv4());
+
+  const connectToEventSource = (roomId) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const eventSource = new EventSource(
+      `${API_BASE_URL}/api/events?roomId=${roomId}&clientId=${clientId.current}`
+    );
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      if (data.type === 'keepalive') return;
+      
+      if (data.type === 'music_state') {
+        if (audioRef.current) {
+          audioRef.current.src = data.data.track;
+          audioRef.current.currentTime = data.data.currentTime;
+          setIsPlaying(data.data.isPlaying);
+          
+          if (data.data.isPlaying) {
+            audioRef.current.play().catch(error => {
+              console.error('Audio playback error:', error);
+              setMessage('Error playing audio. Please check the URL.');
+            });
+          } else {
+            audioRef.current.pause();
+          }
+        }
+      } else if (data.type === 'user_joined') {
+        setUsers(prev => [...prev, data.data.username]);
+        setMessage(`${data.data.username} joined the room`);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('EventSource error:', error);
+      setMessage('Connection error. Reconnecting...');
+      eventSource.close();
+      setTimeout(() => connectToEventSource(roomId), 3000);
+    };
+
+    eventSourceRef.current = eventSource;
+  };
 
   useEffect(() => {
-    // Configure Socket.IO client with proper options
-    const newSocket = io('https://broadcast-music.vercel.app', {
-      withCredentials: true,
-      transports: ['websocket'],
-      path: '/socket.io',
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
-    });
-
-    newSocket.on('connect', () => {
-      console.log('Connected to server');
-    });
-
-    newSocket.on('connect_error', (error) => {
-      console.error('Connection error:', error);
-      setMessage('Connection error. Please try again.');
-    });
-
-    setSocket(newSocket);
-
-    return () => newSocket.close();
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
   }, []);
 
-  useEffect(() => {
-    if (!socket) return;
+  const createRoom = async () => {
+    if (!roomId || !username) {
+      setMessage('Please enter both room ID and username');
+      return;
+    }
 
-    socket.on('room_created', (response) => {
-      if (response.success) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/create-room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, username })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
         setInRoom(true);
         setIsHost(true);
-        setMessage(`Room ${response.roomId} created successfully!`);
+        setMessage(`Room ${data.roomId} created successfully!`);
+        connectToEventSource(roomId);
       } else {
-        setMessage(response.message);
+        setMessage(data.message);
       }
-    });
+    } catch (error) {
+      console.error('Error creating room:', error);
+      setMessage('Error creating room. Please try again.');
+    }
+  };
 
-    socket.on('join_failed', (data) => {
-      setMessage(data.message);
-    });
-
-    socket.on('music_state', (data) => {
-      if (audioRef.current) {
-        audioRef.current.src = data.track;
-        audioRef.current.currentTime = data.currentTime;
-        setIsPlaying(data.isPlaying);
-        
-        if (data.isPlaying) {
-          audioRef.current.play().catch(error => {
-            console.error('Audio playback error:', error);
-            setMessage('Error playing audio. Please check the URL.');
-          });
-        } else {
-          audioRef.current.pause();
-        }
-      }
-    });
-
-    socket.on('user_joined', (data) => {
-      setUsers(prev => [...prev, data.username]);
-      setMessage(`${data.username} joined the room`);
-    });
-
-    // Add error handling for disconnections
-    socket.on('disconnect', () => {
-      setMessage('Disconnected from server. Attempting to reconnect...');
-    });
-
-    return () => {
-      socket.off('room_created');
-      socket.off('join_failed');
-      socket.off('music_state');
-      socket.off('user_joined');
-      socket.off('disconnect');
-    };
-  }, [socket]);
-
-  const createRoom = () => {
+  const joinRoom = async () => {
     if (!roomId || !username) {
       setMessage('Please enter both room ID and username');
       return;
     }
-    socket.emit('create_room', { roomId, username });
-  };
 
-  const joinRoom = () => {
-    if (!roomId || !username) {
-      setMessage('Please enter both room ID and username');
-      return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/join-room`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, username })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setInRoom(true);
+        setUsers(data.currentState.users);
+        connectToEventSource(roomId);
+      } else {
+        setMessage(data.message);
+      }
+    } catch (error) {
+      console.error('Error joining room:', error);
+      setMessage('Error joining room. Please try again.');
     }
-    socket.emit('join_room', { roomId, username });
-    setInRoom(true);
   };
 
-  const setMusic = () => {
+  const setMusic = async () => {
     if (!musicUrl) {
       setMessage('Please enter a music URL');
       return;
     }
-    socket.emit('set_music', { roomId, track: musicUrl });
-    setMessage('Music updated!');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/set-music`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomId, track: musicUrl })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setMessage('Music updated!');
+      } else {
+        setMessage(data.message);
+      }
+    } catch (error) {
+      console.error('Error setting music:', error);
+      setMessage('Error updating music. Please try again.');
+    }
   };
 
-  const togglePlayPause = () => {
+  const togglePlayPause = async () => {
     if (!audioRef.current) return;
 
     const newPlayState = !isPlaying;
     setIsPlaying(newPlayState);
 
-    if (newPlayState) {
-      audioRef.current.play().catch(error => {
-        console.error('Audio playback error:', error);
-        setMessage('Error playing audio. Please check the URL.');
-        setIsPlaying(false);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/play-pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId,
+          isPlaying: newPlayState,
+          currentTime: audioRef.current.currentTime
+        })
       });
-    } else {
-      audioRef.current.pause();
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        setMessage(data.message);
+        setIsPlaying(!newPlayState); // Revert state if failed
+      }
+    } catch (error) {
+      console.error('Error toggling play/pause:', error);
+      setMessage('Error updating playback state. Please try again.');
+      setIsPlaying(!newPlayState); // Revert state if failed
     }
-    
-    socket.emit('play_pause', {
-      roomId,
-      isPlaying: newPlayState,
-      currentTime: audioRef.current.currentTime
-    });
   };
 
   return (
