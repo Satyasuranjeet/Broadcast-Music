@@ -6,14 +6,14 @@ app = Flask(__name__)
 # Configure CORS properly
 CORS(app, resources={
     r"/*": {
-        "origins": ["https://broadcast-music-gqhx.vercel.app", "https://broadcast-music.vercel.app"],
+        "origins": ["https://broadcast-music-gqhx.vercel.app/", "https://broadcast-music.vercel.app/"],
         "methods": ["GET", "POST"],
         "allow_headers": ["Content-Type"]
     }
 })
 
 # Configure SocketIO with proper CORS settings
-socketio = SocketIO(app, cors_allowed_origins=["https://broadcast-music-gqhx.vercel.app", "https://broadcast-music.vercel.app"])
+socketio = SocketIO(app, cors_allowed_origins=["https://broadcast-music-gqhx.vercel.app/", "https://broadcast-music.vercel.app/"])
 
 rooms = {}
 
