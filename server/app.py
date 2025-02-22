@@ -57,7 +57,7 @@ def fetch_song_data(query):
 
 @app.route('/songs', methods=['GET'])
 def get_songs():
-    query = request.args.get('query', '')
+    query = request.args.get('query', 'Stree2')
     
     if not query:
         return jsonify({"error": "No song name provided"}), 400
