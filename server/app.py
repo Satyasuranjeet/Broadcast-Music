@@ -3,7 +3,9 @@ from flask_cors import CORS
 import json
 import queue
 import os
+import uuid
 from collections import defaultdict
+from werkzeug.serving import WSGIRequestHandler
 
 app = Flask(__name__)
 CORS(app)
@@ -12,8 +14,8 @@ CORS(app)
 rooms = {}
 room_queues = defaultdict(lambda: defaultdict(queue.Queue))
 
-# Get port from environment variable with a default of 5000
-port = int(os.environ.get('PORT', 5000))
+# Get port from environment variable with a default of 10000 (Render's requirement)
+port = int(os.environ.get('PORT', 10000))
 
 @app.route('/')
 def home():
@@ -379,27 +381,60 @@ def play_pause():
 @app.route('/events')
 def events():
     room_id = request.args.get('roomId')
+    client_id = request.args.get('clientId', str(uuid.uuid4()))
     
     if room_id not in rooms:
         return jsonify({'error': 'Room not found'}), 404
 
     def generate():
-        room_queue = room_queues[room_id][request.environ['REMOTE_ADDR']]
-        while True:
-            message = room_queue.get()
-            yield f"data: {json.dumps(message)}\n\n"
+        client_queue = room_queues[room_id][client_id]
+        try:
+            while True:
+                # Get message from queue with timeout
+                try:
+                    message = client_queue.get(timeout=30)
+                    yield f"data: {json.dumps(message)}\n\n"
+                except queue.Empty:
+                    # Send keepalive ping
+                    yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+        except GeneratorExit:
+            # Clean up when client disconnects
+            if client_id in room_queues[room_id]:
+                del room_queues[room_id][client_id]
+            if not room_queues[room_id]:
+                del room_queues[room_id]
 
-    return Response(generate(), mimetype='text/event-stream')
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
 
 def broadcast_to_room(room_id, message):
     if room_id in room_queues:
-        for client_queue in room_queues[room_id].values():
-            client_queue.put(message)
+        dead_clients = []
+        for client_id, client_queue in room_queues[room_id].items():
+            try:
+                client_queue.put_nowait(message)
+            except queue.Full:
+                dead_clients.append(client_id)
+        
+        # Clean up dead clients
+        for client_id in dead_clients:
+            del room_queues[room_id][client_id]
 
 if __name__ == '__main__':
-    # Bind to PORT and HOST environment variables
+    # Increase the timeout for Werkzeug's request handling
+    WSGIRequestHandler.protocol_version = "HTTP/1.1"
+    
+    # Run the app
     app.run(
-        host='0.0.0.0',  # Required for Render
+        host='0.0.0.0',
         port=port,
-        debug=False  # Disable debug mode in production
+        debug=False,
+        threaded=True
     )
