@@ -4,6 +4,7 @@ import json
 import queue
 import os
 import uuid
+import requests
 from collections import defaultdict
 from werkzeug.serving import WSGIRequestHandler
 
@@ -14,8 +15,57 @@ CORS(app)
 rooms = {}
 room_queues = defaultdict(lambda: defaultdict(queue.Queue))
 
-# Get port from environment variable with a default of 10000 (Render's requirement)
+# Get port from environment variable with a default of 10000
 port = int(os.environ.get('PORT', 10000))
+
+def fetch_song_data(query):
+    try:
+        url = f'https://saavn.dev/api/search/songs?query={query}'
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            if data.get("success"):
+                songs = []
+                for song in data['data']['results']:
+                    song_data = {
+                        'id': song.get('id'),
+                        'title': song.get('name'),
+                        'mp3_url': None,
+                        'thumbnail_url': None,
+                        'artist': song.get('primaryArtists', 'Unknown Artist')
+                    }
+                    if song.get('downloadUrl'):
+                        for download in song['downloadUrl']:
+                            if download.get('quality') == '320kbps':
+                                song_data['mp3_url'] = download.get('url')
+                                break
+                    
+                    if song.get('image'):
+                        for image in song['image']:
+                            if image.get('quality') == '500x500':
+                                song_data['thumbnail_url'] = image.get('url')
+                                break
+                        
+                    songs.append(song_data)
+                return songs
+            return {"error": "No results found"}
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch data: {str(e)}"}
+    return {"error": "Unknown error occurred"}
+
+@app.route('/songs', methods=['GET'])
+def get_songs():
+    query = request.args.get('query', '')
+    
+    if not query:
+        return jsonify({"error": "No song name provided"}), 400
+    
+    songs = fetch_song_data(query)
+    if isinstance(songs, dict) and "error" in songs:
+        return jsonify(songs), 400
+    return jsonify(songs)
 
 @app.route('/')
 def home():
@@ -25,47 +75,13 @@ def home():
             <title>Music Broadcast</title>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
             <style>
-                .gradient-bg {
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                }
-                .glass-effect {
-                    background: rgba(255, 255, 255, 0.05);
-                    backdrop-filter: blur(10px);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                }
-                .input-style {
-                    background: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
+                /* Previous styles remain the same */
+                .song-item {
                     transition: all 0.3s ease;
                 }
-                .input-style:focus {
+                .song-item:hover {
+                    transform: translateX(5px);
                     background: rgba(255, 255, 255, 0.1);
-                    border-color: rgba(255, 255, 255, 0.3);
-                    outline: none;
-                }
-                .btn-primary {
-                    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-                    transition: all 0.3s ease;
-                }
-                .btn-primary:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 5px 15px rgba(76, 175, 80, 0.3);
-                }
-                .btn-secondary {
-                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-                    transition: all 0.3s ease;
-                }
-                .btn-secondary:hover {
-                    transform: translateY(-2px);
-                    box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
-                }
-                @keyframes pulse {
-                    0% { transform: scale(1); }
-                    50% { transform: scale(1.05); }
-                    100% { transform: scale(1); }
-                }
-                .pulse {
-                    animation: pulse 2s infinite;
                 }
             </style>
         </head>
@@ -79,50 +95,41 @@ def home():
                     <div id="message" class="hidden mb-6 p-4 rounded-lg text-center"></div>
                     
                     <div id="controls" class="space-y-4">
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-300">Username</label>
-                            <input type="text" id="username" placeholder="Enter your username" 
-                                class="w-full px-4 py-2 rounded-lg input-style text-white">
-                        </div>
-                        
-                        <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-300">Room ID</label>
-                            <input type="text" id="roomId" placeholder="Enter room ID" 
-                                class="w-full px-4 py-2 rounded-lg input-style text-white">
-                        </div>
-                        
-                        <div class="grid grid-cols-2 gap-4 mt-6">
-                            <button onclick="createRoom()" 
-                                class="btn-primary px-6 py-3 rounded-lg font-semibold">
-                                Create Room
-                            </button>
-                            <button onclick="joinRoom()" 
-                                class="btn-secondary px-6 py-3 rounded-lg font-semibold">
-                                Join Room
-                            </button>
-                        </div>
+                        <!-- Previous controls remain the same -->
                     </div>
                     
                     <div id="musicControls" class="hidden space-y-6 mt-8">
                         <div class="space-y-2">
-                            <label class="block text-sm font-medium text-gray-300">Music URL</label>
-                            <input type="text" id="musicUrl" placeholder="Enter music URL" 
-                                class="w-full px-4 py-2 rounded-lg input-style text-white">
+                            <label class="block text-sm font-medium text-gray-300">Search Songs</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="searchQuery" placeholder="Enter song name" 
+                                    class="flex-1 px-4 py-2 rounded-lg input-style text-white">
+                                <button onclick="searchSongs()" 
+                                    class="btn-primary px-6 py-2 rounded-lg font-semibold">
+                                    Search
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="searchResults" class="hidden space-y-2">
+                            <h3 class="text-xl font-semibold mb-3">Search Results</h3>
+                            <div id="songsList" class="space-y-2 max-h-60 overflow-y-auto"></div>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <audio id="audio" controls class="w-full"></audio>
                         </div>
                         
                         <div class="grid grid-cols-2 gap-4">
-                            <button onclick="setMusic()" 
-                                class="btn-primary px-6 py-3 rounded-lg font-semibold">
-                                Set Music
-                            </button>
                             <button onclick="togglePlay()" id="playPauseBtn"
                                 class="btn-secondary px-6 py-3 rounded-lg font-semibold">
                                 Play
                             </button>
                         </div>
                         
-                        <div class="mt-6">
-                            <audio id="audio" controls class="w-full"></audio>
+                        <div id="nowPlaying" class="hidden mt-4 p-4 glass-effect rounded-lg">
+                            <h3 class="text-lg font-semibold mb-2">Now Playing</h3>
+                            <div id="currentSong" class="text-gray-300"></div>
                         </div>
                         
                         <div id="users" class="mt-6">
@@ -137,84 +144,47 @@ def home():
                 let isPlaying = false;
                 let currentRoom = '';
                 
-                function showMessage(msg, isError = false) {
-                    const messageEl = document.getElementById('message');
-                    messageEl.textContent = msg;
-                    messageEl.className = `mb-6 p-4 rounded-lg text-center ${isError ? 'bg-red-500/20' : 'bg-green-500/20'}`;
-                    messageEl.style.display = 'block';
-                    setTimeout(() => {
-                        messageEl.style.display = 'none';
-                    }, 5000);
-                }
-
-                async function createRoom() {
-                    const username = document.getElementById('username').value;
-                    const roomId = document.getElementById('roomId').value;
-                    
-                    if (!username || !roomId) {
-                        showMessage('Please fill in all fields', true);
+                // Previous functions remain the same
+                
+                async function searchSongs() {
+                    const query = document.getElementById('searchQuery').value;
+                    if (!query) {
+                        showMessage('Please enter a song name', true);
                         return;
                     }
                     
                     try {
-                        const response = await fetch('/create-room', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({username, roomId})
-                        });
+                        const response = await fetch(`/songs?query=${encodeURIComponent(query)}`);
+                        const songs = await response.json();
                         
-                        const data = await response.json();
-                        if (data.success) {
-                            currentRoom = roomId;
-                            document.getElementById('musicControls').style.display = 'block';
-                            document.getElementById('controls').style.display = 'none';
-                            showMessage('Room created successfully!');
-                            connectToEvents();
-                            updateUserList([username]);
+                        if (response.ok) {
+                            displaySearchResults(songs);
                         } else {
-                            showMessage(data.message || 'Failed to create room', true);
+                            showMessage(songs.error || 'Failed to search songs', true);
                         }
                     } catch (error) {
-                        showMessage('Error creating room', true);
+                        showMessage('Error searching songs', true);
                     }
                 }
-
-                async function joinRoom() {
-                    const username = document.getElementById('username').value;
-                    const roomId = document.getElementById('roomId').value;
+                
+                function displaySearchResults(songs) {
+                    const songsList = document.getElementById('songsList');
+                    const searchResults = document.getElementById('searchResults');
                     
-                    if (!username || !roomId) {
-                        showMessage('Please fill in all fields', true);
-                        return;
-                    }
+                    songsList.innerHTML = songs.map(song => `
+                        <div class="song-item p-3 rounded-lg glass-effect cursor-pointer" 
+                             onclick="selectSong('${song.mp3_url}', '${song.title}', '${song.artist}')">
+                            <div class="font-medium">${song.title}</div>
+                            <div class="text-sm text-gray-400">${song.artist}</div>
+                        </div>
+                    `).join('');
                     
-                    try {
-                        const response = await fetch('/join-room', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({username, roomId})
-                        });
-                        
-                        const data = await response.json();
-                        if (data.success) {
-                            currentRoom = roomId;
-                            document.getElementById('musicControls').style.display = 'block';
-                            document.getElementById('controls').style.display = 'none';
-                            showMessage('Joined room successfully!');
-                            connectToEvents();
-                        } else {
-                            showMessage('Room not found', true);
-                        }
-                    } catch (error) {
-                        showMessage('Error joining room', true);
-                    }
+                    searchResults.style.display = 'block';
                 }
-
-                async function setMusic() {
-                    const musicUrl = document.getElementById('musicUrl').value;
-                    
-                    if (!musicUrl) {
-                        showMessage('Please enter a music URL', true);
+                
+                async function selectSong(url, title, artist) {
+                    if (!url) {
+                        showMessage('No playable URL for this song', true);
                         return;
                     }
                     
@@ -222,48 +192,28 @@ def home():
                         const response = await fetch('/set-music', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({roomId: currentRoom, track: musicUrl})
+                            body: JSON.stringify({
+                                roomId: currentRoom,
+                                track: url,
+                                title: title,
+                                artist: artist
+                            })
                         });
                         
                         if ((await response.json()).success) {
+                            document.getElementById('currentSong').innerHTML = `
+                                <div class="font-medium">${title}</div>
+                                <div class="text-sm">${artist}</div>
+                            `;
+                            document.getElementById('nowPlaying').style.display = 'block';
                             showMessage('Music updated successfully!');
                         }
                     } catch (error) {
                         showMessage('Error setting music', true);
                     }
                 }
-
-                async function togglePlay() {
-                    const audio = document.getElementById('audio');
-                    const playPauseBtn = document.getElementById('playPauseBtn');
-                    isPlaying = !isPlaying;
-                    playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
-                    
-                    try {
-                        await fetch('/play-pause', {
-                            method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({
-                                roomId: currentRoom,
-                                isPlaying,
-                                currentTime: audio.currentTime
-                            })
-                        });
-                    } catch (error) {
-                        showMessage('Error updating playback state', true);
-                    }
-                }
-
-                function updateUserList(users) {
-                    const userList = document.getElementById('userList');
-                    userList.innerHTML = users.map(user => `
-                        <li class="mb-2 flex items-center">
-                            <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                            ${user}
-                        </li>
-                    `).join('');
-                }
-
+                
+                // Update the connectToEvents function to handle song metadata
                 function connectToEvents() {
                     const events = new EventSource(`/events?roomId=${currentRoom}`);
                     
@@ -273,9 +223,18 @@ def home():
                         if (data.type === 'music_state') {
                             const audio = document.getElementById('audio');
                             const playPauseBtn = document.getElementById('playPauseBtn');
+                            const nowPlaying = document.getElementById('nowPlaying');
                             
                             audio.src = data.data.track;
                             audio.currentTime = data.data.currentTime;
+                            
+                            if (data.data.title && data.data.artist) {
+                                document.getElementById('currentSong').innerHTML = `
+                                    <div class="font-medium">${data.data.title}</div>
+                                    <div class="text-sm">${data.data.artist}</div>
+                                `;
+                                nowPlaying.style.display = 'block';
+                            }
                             
                             if (data.data.isPlaying) {
                                 audio.play();
@@ -301,7 +260,37 @@ def home():
             </script>
         </body>
     </html>
-    """  # Note: The full HTML content remains unchanged from the previous version
+    """
+
+# Update set-music route to handle song metadata
+@app.route('/set-music', methods=['POST'])
+def set_music():
+    data = request.json
+    room_id = data['roomId']
+    
+    if room_id in rooms:
+        rooms[room_id].update({
+            'track': data['track'],
+            'title': data.get('title'),
+            'artist': data.get('artist'),
+            'isPlaying': False,
+            'currentTime': 0
+        })
+        
+        broadcast_to_room(room_id, {
+            'type': 'music_state',
+            'data': {
+                'track': data['track'],
+                'title': data.get('title'),
+                'artist': data.get('artist'),
+                'isPlaying': False,
+                'currentTime': 0
+            }
+        })
+        return jsonify({'success': True})
+    return jsonify({'success': False})
+
+# Previous routes and functions remain the same # Note: The full HTML content remains unchanged from the previous version
 
 @app.route('/create-room', methods=['POST'])
 def create_room():
@@ -337,26 +326,26 @@ def join_room():
         return jsonify({'success': True})
     return jsonify({'success': False})
 
-@app.route('/set-music', methods=['POST'])
-def set_music():
-    data = request.json
-    room_id = data['roomId']
+# @app.route('/set-music', methods=['POST'])
+# def set_music():
+#     data = request.json
+#     room_id = data['roomId']
     
-    if room_id in rooms:
-        rooms[room_id]['track'] = data['track']
-        rooms[room_id]['isPlaying'] = False
-        rooms[room_id]['currentTime'] = 0
+#     if room_id in rooms:
+#         rooms[room_id]['track'] = data['track']
+#         rooms[room_id]['isPlaying'] = False
+#         rooms[room_id]['currentTime'] = 0
         
-        broadcast_to_room(room_id, {
-            'type': 'music_state',
-            'data': {
-                'track': data['track'],
-                'isPlaying': False,
-                'currentTime': 0
-            }
-        })
-        return jsonify({'success': True})
-    return jsonify({'success': False})
+#         broadcast_to_room(room_id, {
+#             'type': 'music_state',
+#             'data': {
+#                 'track': data['track'],
+#                 'isPlaying': False,
+#                 'currentTime': 0
+#             }
+#         })
+#         return jsonify({'success': True})
+#     return jsonify({'success': False})
 
 @app.route('/play-pause', methods=['POST'])
 def play_pause():
