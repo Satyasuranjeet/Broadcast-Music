@@ -2,27 +2,301 @@ from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 import json
 import queue
-import threading
 from collections import defaultdict
 
 app = Flask(__name__)
-CORS(app, resources={
-    r"/*": {
-        "origins": ["https://broadcast-music-gqhx.vercel.app", "https://broadcast-music.vercel.app"],
-        "methods": ["GET", "POST"],
-        "allow_headers": ["Content-Type"]
-    }
-})
+CORS(app)
 
-# Store rooms and their event queues
 rooms = {}
 room_queues = defaultdict(lambda: defaultdict(queue.Queue))
 
 @app.route('/')
-def index():
-    return "Music Broadcast Server Running"
+def home():
+    return """
+    <html>
+        <head>
+            <title>Music Broadcast</title>
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+            <style>
+                .gradient-bg {
+                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                }
+                .glass-effect {
+                    background: rgba(255, 255, 255, 0.05);
+                    backdrop-filter: blur(10px);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                }
+                .input-style {
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    transition: all 0.3s ease;
+                }
+                .input-style:focus {
+                    background: rgba(255, 255, 255, 0.1);
+                    border-color: rgba(255, 255, 255, 0.3);
+                    outline: none;
+                }
+                .btn-primary {
+                    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+                    transition: all 0.3s ease;
+                }
+                .btn-primary:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(76, 175, 80, 0.3);
+                }
+                .btn-secondary {
+                    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                    transition: all 0.3s ease;
+                }
+                .btn-secondary:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+                }
+                @keyframes pulse {
+                    0% { transform: scale(1); }
+                    50% { transform: scale(1.05); }
+                    100% { transform: scale(1); }
+                }
+                .pulse {
+                    animation: pulse 2s infinite;
+                }
+            </style>
+        </head>
+        <body class="gradient-bg min-h-screen text-white font-sans">
+            <div class="container mx-auto px-4 py-8 max-w-2xl">
+                <div class="glass-effect rounded-xl p-8 shadow-2xl">
+                    <h1 class="text-4xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-blue-500">
+                        Music Broadcast
+                    </h1>
+                    
+                    <div id="message" class="hidden mb-6 p-4 rounded-lg text-center"></div>
+                    
+                    <div id="controls" class="space-y-4">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-300">Username</label>
+                            <input type="text" id="username" placeholder="Enter your username" 
+                                class="w-full px-4 py-2 rounded-lg input-style text-white">
+                        </div>
+                        
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-300">Room ID</label>
+                            <input type="text" id="roomId" placeholder="Enter room ID" 
+                                class="w-full px-4 py-2 rounded-lg input-style text-white">
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 mt-6">
+                            <button onclick="createRoom()" 
+                                class="btn-primary px-6 py-3 rounded-lg font-semibold">
+                                Create Room
+                            </button>
+                            <button onclick="joinRoom()" 
+                                class="btn-secondary px-6 py-3 rounded-lg font-semibold">
+                                Join Room
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="musicControls" class="hidden space-y-6 mt-8">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-300">Music URL</label>
+                            <input type="text" id="musicUrl" placeholder="Enter music URL" 
+                                class="w-full px-4 py-2 rounded-lg input-style text-white">
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <button onclick="setMusic()" 
+                                class="btn-primary px-6 py-3 rounded-lg font-semibold">
+                                Set Music
+                            </button>
+                            <button onclick="togglePlay()" id="playPauseBtn"
+                                class="btn-secondary px-6 py-3 rounded-lg font-semibold">
+                                Play
+                            </button>
+                        </div>
+                        
+                        <div class="mt-6">
+                            <audio id="audio" controls class="w-full"></audio>
+                        </div>
+                        
+                        <div id="users" class="mt-6">
+                            <h3 class="text-xl font-semibold mb-3">Connected Users</h3>
+                            <ul id="userList" class="list-disc list-inside text-gray-300"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <script>
+                let isPlaying = false;
+                let currentRoom = '';
+                
+                function showMessage(msg, isError = false) {
+                    const messageEl = document.getElementById('message');
+                    messageEl.textContent = msg;
+                    messageEl.className = `mb-6 p-4 rounded-lg text-center ${isError ? 'bg-red-500/20' : 'bg-green-500/20'}`;
+                    messageEl.style.display = 'block';
+                    setTimeout(() => {
+                        messageEl.style.display = 'none';
+                    }, 5000);
+                }
 
-@app.route('/api/create-room', methods=['POST'])
+                async function createRoom() {
+                    const username = document.getElementById('username').value;
+                    const roomId = document.getElementById('roomId').value;
+                    
+                    if (!username || !roomId) {
+                        showMessage('Please fill in all fields', true);
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/create-room', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({username, roomId})
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                            currentRoom = roomId;
+                            document.getElementById('musicControls').style.display = 'block';
+                            document.getElementById('controls').style.display = 'none';
+                            showMessage('Room created successfully!');
+                            connectToEvents();
+                            updateUserList([username]);
+                        } else {
+                            showMessage(data.message || 'Failed to create room', true);
+                        }
+                    } catch (error) {
+                        showMessage('Error creating room', true);
+                    }
+                }
+
+                async function joinRoom() {
+                    const username = document.getElementById('username').value;
+                    const roomId = document.getElementById('roomId').value;
+                    
+                    if (!username || !roomId) {
+                        showMessage('Please fill in all fields', true);
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/join-room', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({username, roomId})
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                            currentRoom = roomId;
+                            document.getElementById('musicControls').style.display = 'block';
+                            document.getElementById('controls').style.display = 'none';
+                            showMessage('Joined room successfully!');
+                            connectToEvents();
+                        } else {
+                            showMessage('Room not found', true);
+                        }
+                    } catch (error) {
+                        showMessage('Error joining room', true);
+                    }
+                }
+
+                async function setMusic() {
+                    const musicUrl = document.getElementById('musicUrl').value;
+                    
+                    if (!musicUrl) {
+                        showMessage('Please enter a music URL', true);
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/set-music', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({roomId: currentRoom, track: musicUrl})
+                        });
+                        
+                        if ((await response.json()).success) {
+                            showMessage('Music updated successfully!');
+                        }
+                    } catch (error) {
+                        showMessage('Error setting music', true);
+                    }
+                }
+
+                async function togglePlay() {
+                    const audio = document.getElementById('audio');
+                    const playPauseBtn = document.getElementById('playPauseBtn');
+                    isPlaying = !isPlaying;
+                    playPauseBtn.textContent = isPlaying ? 'Pause' : 'Play';
+                    
+                    try {
+                        await fetch('/play-pause', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                roomId: currentRoom,
+                                isPlaying,
+                                currentTime: audio.currentTime
+                            })
+                        });
+                    } catch (error) {
+                        showMessage('Error updating playback state', true);
+                    }
+                }
+
+                function updateUserList(users) {
+                    const userList = document.getElementById('userList');
+                    userList.innerHTML = users.map(user => `
+                        <li class="mb-2 flex items-center">
+                            <span class="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                            ${user}
+                        </li>
+                    `).join('');
+                }
+
+                function connectToEvents() {
+                    const events = new EventSource(`/events?roomId=${currentRoom}`);
+                    
+                    events.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'music_state') {
+                            const audio = document.getElementById('audio');
+                            const playPauseBtn = document.getElementById('playPauseBtn');
+                            
+                            audio.src = data.data.track;
+                            audio.currentTime = data.data.currentTime;
+                            
+                            if (data.data.isPlaying) {
+                                audio.play();
+                                isPlaying = true;
+                                playPauseBtn.textContent = 'Pause';
+                            } else {
+                                audio.pause();
+                                isPlaying = false;
+                                playPauseBtn.textContent = 'Play';
+                            }
+                        } else if (data.type === 'user_joined') {
+                            showMessage(`${data.data.username} joined the room!`);
+                            if (data.data.users) {
+                                updateUserList(data.data.users);
+                            }
+                        }
+                    };
+                    
+                    events.onerror = () => {
+                        showMessage('Connection lost. Reconnecting...', true);
+                    };
+                }
+            </script>
+        </body>
+    </html>
+    """
+
+@app.route('/create-room', methods=['POST'])
 def create_room():
     data = request.json
     room_id = data['roomId']
@@ -30,15 +304,15 @@ def create_room():
     
     if room_id not in rooms:
         rooms[room_id] = {
-            'current_track': '',
-            'is_playing': False,
-            'current_time': 0,
+            'track': '',
+            'isPlaying': False,
+            'currentTime': 0,
             'users': [username]
         }
-        return jsonify({'success': True, 'roomId': room_id})
+        return jsonify({'success': True})
     return jsonify({'success': False, 'message': 'Room already exists'})
 
-@app.route('/api/join-room', methods=['POST'])
+@app.route('/join-room', methods=['POST'])
 def join_room():
     data = request.json
     room_id = data['roomId']
@@ -46,26 +320,25 @@ def join_room():
     
     if room_id in rooms:
         rooms[room_id]['users'].append(username)
-        # Broadcast user joined event to all clients in the room
         broadcast_to_room(room_id, {
             'type': 'user_joined',
-            'data': {'username': username}
+            'data': {
+                'username': username,
+                'users': rooms[room_id]['users']
+            }
         })
-        return jsonify({
-            'success': True,
-            'currentState': rooms[room_id]
-        })
-    return jsonify({'success': False, 'message': 'Room not found'})
+        return jsonify({'success': True})
+    return jsonify({'success': False})
 
-@app.route('/api/set-music', methods=['POST'])
+@app.route('/set-music', methods=['POST'])
 def set_music():
     data = request.json
     room_id = data['roomId']
     
     if room_id in rooms:
-        rooms[room_id]['current_track'] = data['track']
-        rooms[room_id]['is_playing'] = False
-        rooms[room_id]['current_time'] = 0
+        rooms[room_id]['track'] = data['track']
+        rooms[room_id]['isPlaying'] = False
+        rooms[room_id]['currentTime'] = 0
         
         broadcast_to_room(room_id, {
             'type': 'music_state',
@@ -76,46 +349,40 @@ def set_music():
             }
         })
         return jsonify({'success': True})
-    return jsonify({'success': False, 'message': 'Room not found'})
+    return jsonify({'success': False})
 
-@app.route('/api/play-pause', methods=['POST'])
+@app.route('/play-pause', methods=['POST'])
 def play_pause():
     data = request.json
     room_id = data['roomId']
     
     if room_id in rooms:
-        rooms[room_id]['is_playing'] = data['isPlaying']
-        rooms[room_id]['current_time'] = data['currentTime']
+        rooms[room_id]['isPlaying'] = data['isPlaying']
+        rooms[room_id]['currentTime'] = data['currentTime']
         
         broadcast_to_room(room_id, {
             'type': 'music_state',
             'data': {
-                'track': rooms[room_id]['current_track'],
+                'track': rooms[room_id]['track'],
                 'isPlaying': data['isPlaying'],
                 'currentTime': data['currentTime']
             }
         })
         return jsonify({'success': True})
-    return jsonify({'success': False, 'message': 'Room not found'})
+    return jsonify({'success': False})
 
-@app.route('/api/events')
+@app.route('/events')
 def events():
     room_id = request.args.get('roomId')
-    client_id = request.args.get('clientId')
     
     if room_id not in rooms:
         return jsonify({'error': 'Room not found'}), 404
 
     def generate():
-        client_queue = room_queues[room_id][client_id]
+        room_queue = room_queues[room_id][request.environ['REMOTE_ADDR']]
         while True:
-            try:
-                # Get message from queue
-                message = client_queue.get(timeout=30)
-                yield f"data: {json.dumps(message)}\n\n"
-            except queue.Empty:
-                # Send keepalive
-                yield f"data: {json.dumps({'type': 'keepalive'})}\n\n"
+            message = room_queue.get()
+            yield f"data: {json.dumps(message)}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -125,4 +392,4 @@ def broadcast_to_room(room_id, message):
             client_queue.put(message)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True, port=5000)
