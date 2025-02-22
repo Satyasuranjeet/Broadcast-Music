@@ -112,7 +112,7 @@ def home():
             </style>
         </head>
         <body class="gradient-bg min-h-screen text-white font-sans">
-            <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <div class="container mx-auto px-4 py-8 max-w-3xl">
                 <div class="glass-effect rounded-xl p-8 shadow-2xl">
                     <h1 class="text-4xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-blue-500">
                         Music Broadcast
