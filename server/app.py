@@ -2,13 +2,18 @@ from flask import Flask, Response, request, jsonify
 from flask_cors import CORS
 import json
 import queue
+import os
 from collections import defaultdict
 
 app = Flask(__name__)
 CORS(app)
 
+# Store rooms and queues
 rooms = {}
 room_queues = defaultdict(lambda: defaultdict(queue.Queue))
+
+# Get port from environment variable with a default of 5000
+port = int(os.environ.get('PORT', 5000))
 
 @app.route('/')
 def home():
@@ -294,7 +299,7 @@ def home():
             </script>
         </body>
     </html>
-    """
+    """  # Note: The full HTML content remains unchanged from the previous version
 
 @app.route('/create-room', methods=['POST'])
 def create_room():
@@ -392,4 +397,9 @@ def broadcast_to_room(room_id, message):
             client_queue.put(message)
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Bind to PORT and HOST environment variables
+    app.run(
+        host='0.0.0.0',  # Required for Render
+        port=port,
+        debug=False  # Disable debug mode in production
+    )
