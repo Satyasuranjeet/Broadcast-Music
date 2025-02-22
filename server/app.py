@@ -75,7 +75,6 @@ def home():
             <title>Music Broadcast</title>
             <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
             <style>
-                /* Previous styles remain the same */
                 .song-item {
                     transition: all 0.3s ease;
                 }
@@ -144,8 +143,6 @@ def home():
                 let isPlaying = false;
                 let currentRoom = '';
                 
-                // Previous functions remain the same
-                
                 async function searchSongs() {
                     const query = document.getElementById('searchQuery').value;
                     if (!query) {
@@ -213,7 +210,6 @@ def home():
                     }
                 }
                 
-                // Update the connectToEvents function to handle song metadata
                 function connectToEvents() {
                     const events = new EventSource(`/events?roomId=${currentRoom}`);
                     
@@ -262,36 +258,6 @@ def home():
     </html>
     """
 
-# Update set-music route to handle song metadata
-@app.route('/set-music', methods=['POST'])
-def set_music():
-    data = request.json
-    room_id = data['roomId']
-    
-    if room_id in rooms:
-        rooms[room_id].update({
-            'track': data['track'],
-            'title': data.get('title'),
-            'artist': data.get('artist'),
-            'isPlaying': False,
-            'currentTime': 0
-        })
-        
-        broadcast_to_room(room_id, {
-            'type': 'music_state',
-            'data': {
-                'track': data['track'],
-                'title': data.get('title'),
-                'artist': data.get('artist'),
-                'isPlaying': False,
-                'currentTime': 0
-            }
-        })
-        return jsonify({'success': True})
-    return jsonify({'success': False})
-
-# Previous routes and functions remain the same # Note: The full HTML content remains unchanged from the previous version
-
 @app.route('/create-room', methods=['POST'])
 def create_room():
     data = request.json
@@ -326,26 +292,32 @@ def join_room():
         return jsonify({'success': True})
     return jsonify({'success': False})
 
-# @app.route('/set-music', methods=['POST'])
-# def set_music():
-#     data = request.json
-#     room_id = data['roomId']
+@app.route('/set-music', methods=['POST'])
+def set_music():
+    data = request.json
+    room_id = data['roomId']
     
-#     if room_id in rooms:
-#         rooms[room_id]['track'] = data['track']
-#         rooms[room_id]['isPlaying'] = False
-#         rooms[room_id]['currentTime'] = 0
+    if room_id in rooms:
+        rooms[room_id].update({
+            'track': data['track'],
+            'title': data.get('title'),
+            'artist': data.get('artist'),
+            'isPlaying': False,
+            'currentTime': 0
+        })
         
-#         broadcast_to_room(room_id, {
-#             'type': 'music_state',
-#             'data': {
-#                 'track': data['track'],
-#                 'isPlaying': False,
-#                 'currentTime': 0
-#             }
-#         })
-#         return jsonify({'success': True})
-#     return jsonify({'success': False})
+        broadcast_to_room(room_id, {
+            'type': 'music_state',
+            'data': {
+                'track': data['track'],
+                'title': data.get('title'),
+                'artist': data.get('artist'),
+                'isPlaying': False,
+                'currentTime': 0
+            }
+        })
+        return jsonify({'success': True})
+    return jsonify({'success': False})
 
 @app.route('/play-pause', methods=['POST'])
 def play_pause():
@@ -379,15 +351,12 @@ def events():
         client_queue = room_queues[room_id][client_id]
         try:
             while True:
-                # Get message from queue with timeout
                 try:
                     message = client_queue.get(timeout=30)
                     yield f"data: {json.dumps(message)}\n\n"
                 except queue.Empty:
-                    # Send keepalive ping
                     yield f"data: {json.dumps({'type': 'ping'})}\n\n"
         except GeneratorExit:
-            # Clean up when client disconnects
             if client_id in room_queues[room_id]:
                 del room_queues[room_id][client_id]
             if not room_queues[room_id]:
@@ -412,15 +381,12 @@ def broadcast_to_room(room_id, message):
             except queue.Full:
                 dead_clients.append(client_id)
         
-        # Clean up dead clients
         for client_id in dead_clients:
             del room_queues[room_id][client_id]
 
 if __name__ == '__main__':
-    # Increase the timeout for Werkzeug's request handling
     WSGIRequestHandler.protocol_version = "HTTP/1.1"
     
-    # Run the app
     app.run(
         host='0.0.0.0',
         port=port,
