@@ -73,8 +73,35 @@ def home():
     <html>
         <head>
             <title>Music Broadcast</title>
-            <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+            <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
             <style>
+                .gradient-bg {
+                    background: linear-gradient(135deg, #1e3a8a, #1e40af);
+                }
+                .glass-effect {
+                    background: rgba(255, 255, 255, 0.1);
+                    backdrop-filter: blur(10px);
+                    border-radius: 10px;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                }
+                .input-style {
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                }
+                .btn-primary {
+                    background: #3b82f6;
+                    color: white;
+                }
+                .btn-primary:hover {
+                    background: #2563eb;
+                }
+                .btn-secondary {
+                    background: #4f46e5;
+                    color: white;
+                }
+                .btn-secondary:hover {
+                    background: #4338ca;
+                }
                 .song-item {
                     transition: all 0.3s ease;
                 }
@@ -91,12 +118,31 @@ def home():
                         Music Broadcast
                     </h1>
                     
+                    <!-- Message Display -->
                     <div id="message" class="hidden mb-6 p-4 rounded-lg text-center"></div>
                     
+                    <!-- Room Controls -->
                     <div id="controls" class="space-y-4">
-                        <!-- Previous controls remain the same -->
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium text-gray-300">Create or Join Room</label>
+                            <div class="flex space-x-2">
+                                <input type="text" id="roomId" placeholder="Enter Room ID" 
+                                    class="flex-1 px-4 py-2 rounded-lg input-style text-white">
+                                <input type="text" id="username" placeholder="Your Name" 
+                                    class="flex-1 px-4 py-2 rounded-lg input-style text-white">
+                                <button onclick="createRoom()" 
+                                    class="btn-primary px-6 py-2 rounded-lg font-semibold">
+                                    Create Room
+                                </button>
+                                <button onclick="joinRoom()" 
+                                    class="btn-secondary px-6 py-2 rounded-lg font-semibold">
+                                    Join Room
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
+                    <!-- Music Controls (Hidden by Default) -->
                     <div id="musicControls" class="hidden space-y-6 mt-8">
                         <div class="space-y-2">
                             <label class="block text-sm font-medium text-gray-300">Search Songs</label>
@@ -110,15 +156,18 @@ def home():
                             </div>
                         </div>
                         
+                        <!-- Search Results -->
                         <div id="searchResults" class="hidden space-y-2">
                             <h3 class="text-xl font-semibold mb-3">Search Results</h3>
                             <div id="songsList" class="space-y-2 max-h-60 overflow-y-auto"></div>
                         </div>
                         
+                        <!-- Audio Player -->
                         <div class="mt-6">
                             <audio id="audio" controls class="w-full"></audio>
                         </div>
                         
+                        <!-- Play/Pause Button -->
                         <div class="grid grid-cols-2 gap-4">
                             <button onclick="togglePlay()" id="playPauseBtn"
                                 class="btn-secondary px-6 py-3 rounded-lg font-semibold">
@@ -126,11 +175,13 @@ def home():
                             </button>
                         </div>
                         
+                        <!-- Now Playing -->
                         <div id="nowPlaying" class="hidden mt-4 p-4 glass-effect rounded-lg">
                             <h3 class="text-lg font-semibold mb-2">Now Playing</h3>
                             <div id="currentSong" class="text-gray-300"></div>
                         </div>
                         
+                        <!-- Connected Users -->
                         <div id="users" class="mt-6">
                             <h3 class="text-xl font-semibold mb-3">Connected Users</h3>
                             <ul id="userList" class="list-disc list-inside text-gray-300"></ul>
@@ -143,6 +194,80 @@ def home():
                 let isPlaying = false;
                 let currentRoom = '';
                 
+                // Show message to the user
+                function showMessage(message, isError = false) {
+                    const messageDiv = document.getElementById('message');
+                    messageDiv.textContent = message;
+                    messageDiv.className = isError ? 'bg-red-500' : 'bg-green-500';
+                    messageDiv.classList.remove('hidden');
+                    setTimeout(() => messageDiv.classList.add('hidden'), 3000);
+                }
+                
+                // Create a new room
+                async function createRoom() {
+                    const roomId = document.getElementById('roomId').value;
+                    const username = document.getElementById('username').value;
+                    
+                    if (!roomId || !username) {
+                        showMessage('Please enter a room ID and username', true);
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/create-room', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ roomId, username })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                            currentRoom = roomId;
+                            document.getElementById('controls').style.display = 'none';
+                            document.getElementById('musicControls').style.display = 'block';
+                            connectToEvents();
+                            showMessage('Room created successfully!');
+                        } else {
+                            showMessage(data.message || 'Failed to create room', true);
+                        }
+                    } catch (error) {
+                        showMessage('Error creating room', true);
+                    }
+                }
+                
+                // Join an existing room
+                async function joinRoom() {
+                    const roomId = document.getElementById('roomId').value;
+                    const username = document.getElementById('username').value;
+                    
+                    if (!roomId || !username) {
+                        showMessage('Please enter a room ID and username', true);
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/join-room', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ roomId, username })
+                        });
+                        
+                        const data = await response.json();
+                        if (data.success) {
+                            currentRoom = roomId;
+                            document.getElementById('controls').style.display = 'none';
+                            document.getElementById('musicControls').style.display = 'block';
+                            connectToEvents();
+                            showMessage('Joined room successfully!');
+                        } else {
+                            showMessage(data.message || 'Failed to join room', true);
+                        }
+                    } catch (error) {
+                        showMessage('Error joining room', true);
+                    }
+                }
+                
+                // Search for songs
                 async function searchSongs() {
                     const query = document.getElementById('searchQuery').value;
                     if (!query) {
@@ -164,6 +289,7 @@ def home():
                     }
                 }
                 
+                // Display search results
                 function displaySearchResults(songs) {
                     const songsList = document.getElementById('songsList');
                     const searchResults = document.getElementById('searchResults');
@@ -179,6 +305,7 @@ def home():
                     searchResults.style.display = 'block';
                 }
                 
+                // Select a song to play
                 async function selectSong(url, title, artist) {
                     if (!url) {
                         showMessage('No playable URL for this song', true);
@@ -210,6 +337,25 @@ def home():
                     }
                 }
                 
+                // Toggle play/pause
+                function togglePlay() {
+                    const audio = document.getElementById('audio');
+                    isPlaying = !isPlaying;
+                    audio[isPlaying ? 'play' : 'pause']();
+                    document.getElementById('playPauseBtn').textContent = isPlaying ? 'Pause' : 'Play';
+                    
+                    fetch('/play-pause', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            roomId: currentRoom,
+                            isPlaying: isPlaying,
+                            currentTime: audio.currentTime
+                        })
+                    });
+                }
+                
+                // Connect to Server-Sent Events (SSE)
                 function connectToEvents() {
                     const events = new EventSource(`/events?roomId=${currentRoom}`);
                     
@@ -252,6 +398,12 @@ def home():
                     events.onerror = () => {
                         showMessage('Connection lost. Reconnecting...', true);
                     };
+                }
+                
+                // Update the list of connected users
+                function updateUserList(users) {
+                    const userList = document.getElementById('userList');
+                    userList.innerHTML = users.map(user => `<li>${user}</li>`).join('');
                 }
             </script>
         </body>
